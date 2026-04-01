@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Activités Enfants - Trouvez des activités pour vos enfants</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <header class="container">
+        <hgroup>
+            <h1>Activités Enfants</h1>
+            <p>Trouvez des activités pour les enfants de 5 à 10 ans près de chez vous</p>
+        </hgroup>
+    </header>
+
+    <main class="container">
+        <!-- Filters -->
+        <section id="filters">
+            <div class="filters-grid">
+                <div>
+                    <label for="filter-category">Catégorie</label>
+                    <select id="filter-category">
+                        <option value="">Toutes</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="filter-city">Ville</label>
+                    <select id="filter-city">
+                        <option value="">Toutes</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="filter-date-from">Du</label>
+                    <input type="date" id="filter-date-from">
+                </div>
+                <div>
+                    <label for="filter-date-to">Au</label>
+                    <input type="date" id="filter-date-to">
+                </div>
+                <div>
+                    <label for="filter-age">Âge de l'enfant</label>
+                    <input type="number" id="filter-age" min="1" max="18" placeholder="Ex: 7">
+                </div>
+            </div>
+        </section>
+
+        <!-- Results count -->
+        <p id="results-count"></p>
+
+        <!-- Activity cards -->
+        <div id="results" class="activity-grid"></div>
+
+        <!-- Load more -->
+        <div id="load-more-container" style="text-align: center; margin: 2rem 0;">
+            <button id="load-more" class="outline" style="display: none;">
+                Voir plus d'activités
+            </button>
+        </div>
+
+        <!-- Empty state -->
+        <div id="empty-state" style="display: none; text-align: center; padding: 3rem 0;">
+            <p>Aucune activité trouvée pour ces critères.</p>
+            <p><small>Essayez de modifier vos filtres ou revenez plus tard.</small></p>
+        </div>
+    </main>
+
+    <footer class="container">
+        <small>
+            Activités Enfants &mdash; Données collectées automatiquement depuis des sources publiques.
+            Vérifiez toujours les informations sur le site officiel.
+        </small>
+    </footer>
+
+    <script src="/app.js"></script>
+</body>
+</html>
