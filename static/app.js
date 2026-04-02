@@ -6,7 +6,6 @@ const CATEGORY_LABELS = {
     library: "Bibliothèque",
     mjc: "MJC",
     theatre: "Théâtre",
-    cinema: "Cinéma",
 };
 
 let currentPage = 1;

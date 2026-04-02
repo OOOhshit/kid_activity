@@ -7,7 +7,6 @@ from db import insert_activities
 from scraper.library import LibraryScraper
 from scraper.mjc import MJCScraper
 from scraper.theatre import TheatreScraper
-from scraper.cinema import CinemaScraper
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +17,6 @@ async def run_all_scrapers():
         LibraryScraper(),
         MJCScraper(),
         TheatreScraper(),
-        CinemaScraper(),
     ]
 
     all_activities = []

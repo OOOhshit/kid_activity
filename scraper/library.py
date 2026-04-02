@@ -1,4 +1,8 @@
-"""Scraper for municipal library event pages."""
+"""Scraper for municipal library event pages.
+
+Discovers agenda/events pages from the library website, then scrapes
+each page for family and kids activities.
+"""
 
 import logging
 
@@ -18,76 +22,20 @@ class LibraryScraper(BaseScraper):
 
         activities = []
         try:
-            soup = await self.fetch_page(url)
+            # Step 1: Discover agenda/events pages from the site
+            agenda_pages = await self.discover_agenda_pages(url)
+            logger.info(f"Library scraper for {city}: found {len(agenda_pages)} agenda page(s)")
 
-            # Common patterns for library agenda pages
-            # Look for event items in common CSS patterns
-            selectors = [
-                "article.event", ".agenda-item", ".event-item",
-                ".views-row", ".node--type-event", "li.event",
-                ".agenda-list article", ".field-content",
-            ]
-
-            items = []
-            for selector in selectors:
-                items = soup.select(selector)
-                if items:
-                    break
-
-            if not items:
-                # Fallback: look for any structured content with dates
-                items = soup.find_all(["article", "div"], class_=lambda c: c and (
-                    "event" in str(c).lower() or "agenda" in str(c).lower()
-                ))
-
-            for item in items:
-                title_el = item.find(["h2", "h3", "h4", "a"])
-                if not title_el:
-                    continue
-
-                title = title_el.get_text(strip=True)
-                if not title:
-                    continue
-
-                # Extract link
-                link_el = item.find("a", href=True)
-                link = link_el["href"] if link_el else None
-                if link and not link.startswith("http"):
-                    # Make absolute URL
-                    from urllib.parse import urljoin
-                    link = urljoin(url, link)
-
-                # Extract date, time, price from surrounding text
-                full_text = item.get_text(" ", strip=True)
-                event_date = self.parse_french_date(full_text)
-                event_time = self.parse_time(full_text)
-                price = self.extract_price(full_text)
-                age_min, age_max = self.extract_age_range(full_text)
-
-                # Summary: first paragraph or description
-                summary_el = item.find(["p", "div"], class_=lambda c: c and (
-                    "desc" in str(c).lower() or "summary" in str(c).lower() or "body" in str(c).lower()
-                ))
-                summary = summary_el.get_text(strip=True) if summary_el else None
-                if not summary:
-                    # Take first <p> if available
-                    p = item.find("p")
-                    summary = p.get_text(strip=True) if p else None
-
-                activities.append(self.make_activity(
-                    title=title,
-                    city=city,
-                    source_url=url,
-                    summary=summary,
-                    link=link,
-                    event_date=event_date,
-                    event_time=event_time,
-                    price=price,
-                    age_min=age_min,
-                    age_max=age_max,
-                ))
+            # Step 2: Scrape each discovered page for family/kids events
+            for page_url in agenda_pages:
+                try:
+                    page_activities = await self.scrape_agenda_page(page_url, city)
+                    activities.extend(page_activities)
+                except Exception as e:
+                    logger.warning(f"Failed to scrape library page {page_url}: {e}")
 
         except Exception as e:
             logger.error(f"Library scraper failed for {city}: {e}")
 
+        logger.info(f"Library scraper for {city}: collected {len(activities)} activities")
         return activities
