@@ -7,6 +7,7 @@ DB_PATH = os.environ.get("DB_PATH", "activities.db")
 
 # Cities to search (French cities)
 CITIES = [
+    "Le Vésinet",
     "Le Pecq",
     "Chatou",
     "Croissy-sur-Seine",
