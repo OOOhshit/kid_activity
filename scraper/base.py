@@ -37,21 +37,46 @@ AGENDA_KEYWORDS = [
 # Keywords that indicate an event is for families or children
 FAMILY_KEYWORDS = [
     "enfant", "enfants", "famille", "familles", "familial",
-    "jeune public", "jeunesse", "tout-petit", "tout petit",
-    "tout public", "petite enfance",
-    "animation", "atelier", "conte", "contes",
-    "ludique", "ludothèque", "jeu", "jeux",
+    "jeune public", "tout-petit", "tout petit",
+    "tout public",
+    "atelier", "conte", "contes", "spectacle",
+    "ludique", "ludothèque",
     "à partir de 3", "à partir de 4", "à partir de 5",
     "à partir de 6", "à partir de 7", "à partir de 8",
     "dès 3 ans", "dès 4 ans", "dès 5 ans",
     "dès 6 ans", "dès 7 ans", "dès 8 ans",
-    "3 ans", "4 ans", "5 ans", "6 ans", "7 ans", "8 ans",
-    "9 ans", "10 ans",
-    "3-6", "4-8", "5-10", "6-10", "6-12",
-    "scolaire", "périscolaire", "mercredi",
-    "bébé", "bébés", "maternel", "maternelle",
-    "lecture", "heure du conte", "spectacle jeune",
+    "3-6 ans", "4-8 ans", "5-10 ans", "6-10 ans", "6-12 ans",
+    "heure du conte", "spectacle jeune",
+    "en famille", "pour les enfants",
+    "stage vacances", "stage enfant",
 ]
+
+# Keywords that indicate institutional/administrative/recurring content (NOT punctual events)
+EXCLUDE_KEYWORDS = [
+    "petite enfance", "relais petite enfance",
+    "restaurant scolaire", "restauration scolaire", "cantine",
+    "vie scolaire", "établissement scolaire", "etablissement scolaire",
+    "inscription scolaire", "inscriptions scolaires",
+    "activité périscolaire", "activités périscolaires",
+    "accueil périscolaire", "temps périscolaire",
+    "périscolaire", "periscolaire",
+    "crèche", "creche", "halte-garderie", "garderie",
+    "assistante maternelle", "assistant maternel",
+    "relais assistante", "ram ",
+    "carte scolaire", "transport scolaire",
+    "tarif périscolaire", "règlement intérieur",
+    "vos démarches", "votre mairie", "la ville et vous",
+    "demande de prestation", "formulaire",
+    "se connecter", "je m'inscris", "mon compte",
+    "mentions légales", "politique de confidentialité",
+    "plan du site", "contact", "accueil",
+    "organigramme", "annuaire", "newsletter",
+    "espace personnel", "billetterie weezevent",
+    "lire la suite", "plus de détails", "en savoir plus",
+]
+
+# Minimum title length to avoid nav items / buttons
+MIN_TITLE_LENGTH = 8
 
 
 class BaseScraper(ABC):
@@ -208,12 +233,35 @@ class BaseScraper(ABC):
         return any(kw in text for kw in agenda_texts)
 
     @staticmethod
+    def is_excluded_content(text: str) -> bool:
+        """Check if text matches institutional/admin content that should be excluded."""
+        if not text:
+            return False
+        text_lower = text.lower()
+        return any(kw in text_lower for kw in EXCLUDE_KEYWORDS)
+
+    @staticmethod
     def is_family_or_kids_event(text: str) -> bool:
         """Analyze text to determine if an event targets families or children."""
         if not text:
             return False
         text_lower = text.lower()
         return any(kw in text_lower for kw in FAMILY_KEYWORDS)
+
+    @staticmethod
+    def looks_like_event_title(title: str) -> bool:
+        """Check if a title looks like an actual event (not a nav item or URL)."""
+        if len(title) < MIN_TITLE_LENGTH:
+            return False
+        if title.startswith("http://") or title.startswith("https://"):
+            return False
+        if "@" in title and "." in title:
+            return False
+        # Reject if it's mostly digits (phone numbers, zip codes)
+        digits = sum(c.isdigit() for c in title)
+        if digits > len(title) * 0.5:
+            return False
+        return True
 
     async def scrape_agenda_page(self, url: str, city: str) -> list[dict]:
         """Scrape a single agenda page for event items.
@@ -237,10 +285,14 @@ class BaseScraper(ABC):
                 continue
 
             title = title_el.get_text(strip=True)
-            if not title or len(title) < 3:
+            if not title or not self.looks_like_event_title(title):
                 continue
 
             full_text = item.get_text(" ", strip=True)
+
+            # Exclude institutional/admin content
+            if self.is_excluded_content(title) or self.is_excluded_content(full_text):
+                continue
 
             # Filter: only keep events relevant for families/kids
             if not self.is_family_or_kids_event(full_text) and not self.is_family_or_kids_event(title):
