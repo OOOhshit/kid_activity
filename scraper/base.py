@@ -34,49 +34,89 @@ AGENDA_KEYWORDS = [
     "ateliers", "atelier", "stages",
 ]
 
-# Keywords that indicate an event is for families or children
+# Keywords that indicate a PUNCTUAL event for families or children
 FAMILY_KEYWORDS = [
-    "enfant", "enfants", "famille", "familles", "familial",
-    "jeune public", "tout-petit", "tout petit",
-    "tout public",
-    "atelier", "conte", "contes", "spectacle",
-    "ludique", "ludothèque",
+    "spectacle", "spectacle jeune", "jeune public",
+    "conte", "contes", "heure du conte", "lecture",
+    "stage vacances", "stage enfant", "stage",
+    "en famille", "pour les enfants", "pour les familles",
+    "familial", "sortie famille",
     "à partir de 3", "à partir de 4", "à partir de 5",
     "à partir de 6", "à partir de 7", "à partir de 8",
     "dès 3 ans", "dès 4 ans", "dès 5 ans",
     "dès 6 ans", "dès 7 ans", "dès 8 ans",
     "3-6 ans", "4-8 ans", "5-10 ans", "6-10 ans", "6-12 ans",
-    "heure du conte", "spectacle jeune",
-    "en famille", "pour les enfants",
-    "stage vacances", "stage enfant",
+    "festival", "fête", "carnaval", "kermesse",
+    "chasse aux oeufs", "chasse au trésor",
+    "journée portes ouvertes", "portes ouvertes",
+    "vacances", "halloween", "noël", "noel", "pâques",
+    "cinéma plein air", "ciné-goûter",
+    "balade", "randonnée", "sortie nature",
 ]
 
-# Keywords that indicate institutional/administrative/recurring content (NOT punctual events)
+# Keywords that indicate institutional/admin/recurring content to EXCLUDE
 EXCLUDE_KEYWORDS = [
+    # --- Petite enfance / garde ---
     "petite enfance", "relais petite enfance",
+    "crèche", "creche", "halte-garderie", "garderie",
+    "assistante maternelle", "assistant maternel",
+    "relais assistante", "ram ",
+    # --- Scolaire / périscolaire ---
     "restaurant scolaire", "restauration scolaire", "cantine",
     "vie scolaire", "établissement scolaire", "etablissement scolaire",
     "inscription scolaire", "inscriptions scolaires",
     "activité périscolaire", "activités périscolaires",
     "accueil périscolaire", "temps périscolaire",
     "périscolaire", "periscolaire",
-    "crèche", "creche", "halte-garderie", "garderie",
-    "assistante maternelle", "assistant maternel",
-    "relais assistante", "ram ",
     "carte scolaire", "transport scolaire",
-    "tarif périscolaire", "règlement intérieur",
+    "tarif périscolaire",
+    # --- Cours annuels / activités régulières ---
+    "cours hebdomadaire", "cours annuel", "toute l'année",
+    "septembre à juin", "de septembre à",
+    "trimestre", "semestre",
+    "du lundi au vendredi",
+    "accueil de loisirs", "accueils de loisirs",
+    "quotient familial", "quotient individuel",
+    # --- Navigation / interface ---
+    "règlement intérieur",
     "vos démarches", "votre mairie", "la ville et vous",
     "demande de prestation", "formulaire",
     "se connecter", "je m'inscris", "mon compte",
     "mentions légales", "politique de confidentialité",
-    "plan du site", "contact", "accueil",
-    "organigramme", "annuaire", "newsletter",
+    "plan du site", "annuaire", "newsletter",
     "espace personnel", "billetterie weezevent",
     "lire la suite", "plus de détails", "en savoir plus",
+    "organigramme", "à votre service",
+    "education et jeunesse",
+    "des espaces de jeux", "aires de jeux",
+    "parcours de santé",
+    "opération tranquillité vacances",
+    "l'esprit tranquille",
+    "les parents concernés sont",
+    "le ccas", "service aide à la personne",
+    "résidence renaissance",
 ]
 
+# Titles that are generic category labels, not actual events
+GENERIC_TITLE_BLOCKLIST = {
+    "sport", "sports", "ecriture", "écriture", "multimedia", "multimédia",
+    "danse", "musique", "théâtre", "theatre", "peinture", "dessin",
+    "yoga", "judo", "karaté", "karate", "gym", "gymnastique",
+    "natation", "tennis", "football", "basket", "rugby",
+    "arts plastiques", "arts du spectacle", "bien-être", "bien être",
+    "informations", "résultats", "contact", "accueil",
+    "enfance jeunesse", "enfance – jeunesse", "jeunesse",
+    "familles", "seniors", "les animations seniors",
+    "la saison", "en famille", "sport en famille",
+    "cliquez-ici", "tout voir",
+    "jeune public", "spectacle", "café lecture",
+    "activités artistiques", "activités culturelles",
+    "mercredi et vacances :", "mercredi et vacances",
+    "activ'jeunes",
+}
+
 # Minimum title length to avoid nav items / buttons
-MIN_TITLE_LENGTH = 8
+MIN_TITLE_LENGTH = 10
 
 
 class BaseScraper(ABC):
@@ -250,16 +290,30 @@ class BaseScraper(ABC):
 
     @staticmethod
     def looks_like_event_title(title: str) -> bool:
-        """Check if a title looks like an actual event (not a nav item or URL)."""
-        if len(title) < MIN_TITLE_LENGTH:
+        """Check if a title looks like an actual event (not a nav item, URL, or generic label)."""
+        title_stripped = title.strip()
+        if len(title_stripped) < MIN_TITLE_LENGTH:
             return False
-        if title.startswith("http://") or title.startswith("https://"):
+        title_lower = title_stripped.lower()
+        # Reject URLs (including without protocol)
+        if title_lower.startswith("http://") or title_lower.startswith("https://"):
             return False
-        if "@" in title and "." in title:
+        if "." in title_stripped and "/" in title_stripped and " " not in title_stripped[:30]:
+            return False
+        # Reject emails
+        if "@" in title_stripped and "." in title_stripped:
+            return False
+        # Reject file references (.pdf, .doc, etc.)
+        if any(title_lower.endswith(ext) for ext in [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip"]):
+            return False
+        if ".pdf" in title_lower or ".doc" in title_lower:
             return False
         # Reject if it's mostly digits (phone numbers, zip codes)
-        digits = sum(c.isdigit() for c in title)
-        if digits > len(title) * 0.5:
+        digits = sum(c.isdigit() for c in title_stripped)
+        if digits > len(title_stripped) * 0.5:
+            return False
+        # Reject generic category labels
+        if title_lower in GENERIC_TITLE_BLOCKLIST:
             return False
         return True
 
