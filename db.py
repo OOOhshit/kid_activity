@@ -80,10 +80,10 @@ def query_activities(
         conditions.append("city = ?")
         params.append(city)
     if date_from:
-        conditions.append("event_date >= ?")
+        conditions.append("(event_date >= ? OR event_date IS NULL)")
         params.append(date_from)
     if date_to:
-        conditions.append("event_date <= ?")
+        conditions.append("(event_date <= ? OR event_date IS NULL)")
         params.append(date_to)
     if age is not None:
         conditions.append("age_min <= ? AND age_max >= ?")

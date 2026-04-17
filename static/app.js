@@ -24,13 +24,7 @@ const emptyState = document.getElementById("empty-state");
 
 // Initialize
 document.addEventListener("DOMContentLoaded", async () => {
-    // Set default date range: today to +30 days
-    const today = new Date();
-    filterDateFrom.value = formatDateISO(today);
-    const nextMonth = new Date(today);
-    nextMonth.setDate(nextMonth.getDate() + 30);
-    filterDateTo.value = formatDateISO(nextMonth);
-
+    // No default date filters — show all activities including those without dates
     await Promise.all([loadCities(), loadCategories()]);
     await fetchActivities();
 
