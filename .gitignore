@@ -4,5 +4,6 @@ __pycache__/
 .env
 venv/
 *.db
+!activities.db
 .idea/
 .vscode/
