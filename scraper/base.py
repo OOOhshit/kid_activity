@@ -2,6 +2,7 @@
 
 import logging
 import re
+import unicodedata
 from abc import ABC, abstractmethod
 from urllib.parse import urljoin, urlparse
 
@@ -9,6 +10,22 @@ import httpx
 from bs4 import BeautifulSoup
 
 from config import REQUEST_TIMEOUT, USER_AGENT
+
+
+def _normalize(text: str) -> str:
+    """Lowercase, NFC-normalize, and unify typographic punctuation for matching."""
+    if not text:
+        return ""
+    t = unicodedata.normalize("NFC", text).lower()
+    # Unify curly quotes and dashes to their ASCII equivalents
+    return (
+        t.replace("\u2019", "'")   # right single quote → '
+         .replace("\u2018", "'")   # left single quote  → '
+         .replace("\u201c", '"')
+         .replace("\u201d", '"')
+         .replace("\u2013", "-")   # en dash
+         .replace("\u2014", "-")   # em dash
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +112,26 @@ EXCLUDE_KEYWORDS = [
     "les parents concernés sont",
     "le ccas", "service aide à la personne",
     "résidence renaissance",
+    # --- Admin / institutionnel supplémentaires ---
+    "horaires d'ouverture", "horaires de",
+    "conseil municipal", "conseil des jeunes",
+    "pôle jeunesse", "pole jeunesse",
+    "s.i.j", "sij du",
+    "retour en photos", "retour en images",
+    "collecte de sang", "don du sang",
+    "sondage", "enquête publique", "enquete publique",
+    "recensement", "élections", "elections",
+    "travaux ", "chantier ", "déviation",
+    "permanence ", "réunion publique", "reunion publique",
+    "commémoration", "commemoration", "cérémonie", "ceremonie",
+    "lettre du maire", "mot du maire",
+    "rétrospective", "retrospective",
+    "covid", "pandémie",
+    "sécheresse", "canicule", "influenza",
+    "au sein de", "vous souhaitez participer",
+    "tier devient", "devient dott",
+    "carré des arts",
+    "ateliers parents-enfants", "ateliers parent-enfant",
 ]
 
 # Titles that are generic category labels, not actual events
@@ -104,6 +141,9 @@ GENERIC_TITLE_BLOCKLIST = {
     "yoga", "judo", "karaté", "karate", "gym", "gymnastique",
     "natation", "tennis", "football", "basket", "rugby",
     "arts plastiques", "arts du spectacle", "bien-être", "bien être",
+    "arts vivants", "arts martiaux",
+    "danse contemp'jazz", "danse contemporaine", "danse classique",
+    "danse jazz", "danse moderne", "danse hip-hop",
     "informations", "résultats", "contact", "accueil",
     "enfance jeunesse", "enfance – jeunesse", "jeunesse",
     "familles", "seniors", "les animations seniors",
@@ -112,7 +152,18 @@ GENERIC_TITLE_BLOCKLIST = {
     "jeune public", "spectacle", "café lecture",
     "activités artistiques", "activités culturelles",
     "mercredi et vacances :", "mercredi et vacances",
-    "activ'jeunes",
+    "activ'jeunes", "stages vacances", "stages",
+    "au sein de chanorier", "vous souhaitez participer",
+    "vous souhaitez participer ?",
+    "saison culturelle", "programmation scolaire",
+    "spectacles amateurs",
+    "avec nos partenaires", "toute la saison",
+    "je réserve", "je reserve",
+    "comédie musicale", "comedie musicale",
+    "programme des animations",
+    "activités de la bibliothèque", "activites de la bibliotheque",
+    "carte des jpo des artistes 2021",
+    "foot avec l'us croissy",
 }
 
 # Minimum title length to avoid nav items / buttons
@@ -277,26 +328,31 @@ class BaseScraper(ABC):
         """Check if text matches institutional/admin content that should be excluded."""
         if not text:
             return False
-        text_lower = text.lower()
-        return any(kw in text_lower for kw in EXCLUDE_KEYWORDS)
+        text_norm = _normalize(text)
+        return any(_normalize(kw) in text_norm for kw in EXCLUDE_KEYWORDS)
 
     @staticmethod
     def is_family_or_kids_event(text: str) -> bool:
         """Analyze text to determine if an event targets families or children."""
         if not text:
             return False
-        text_lower = text.lower()
-        return any(kw in text_lower for kw in FAMILY_KEYWORDS)
+        text_norm = _normalize(text)
+        return any(_normalize(kw) in text_norm for kw in FAMILY_KEYWORDS)
 
     @staticmethod
     def looks_like_event_title(title: str) -> bool:
         """Check if a title looks like an actual event (not a nav item, URL, or generic label)."""
-        title_stripped = title.strip()
+        title_stripped = unicodedata.normalize("NFC", title).strip()
         if len(title_stripped) < MIN_TITLE_LENGTH:
             return False
-        title_lower = title_stripped.lower()
-        # Reject URLs (including without protocol)
-        if title_lower.startswith("http://") or title_lower.startswith("https://"):
+        title_lower = _normalize(title_stripped)
+        # Reject URLs (with or without protocol)
+        if title_lower.startswith(("http://", "https://", "www.")):
+            return False
+        if "www." in title_lower or "http://" in title_lower or "https://" in title_lower:
+            return False
+        # Reject domain-like strings (x.fr, x.com, x.org at end of title without spaces around)
+        if re.search(r"\b\w+\.(fr|com|org|net|eu)\b", title_lower):
             return False
         if "." in title_stripped and "/" in title_stripped and " " not in title_stripped[:30]:
             return False
@@ -315,7 +371,63 @@ class BaseScraper(ABC):
         # Reject generic category labels
         if title_lower in GENERIC_TITLE_BLOCKLIST:
             return False
+        # Reject short all-caps category labels (e.g. "ARTS VIVANTS", "DANSE CONTEMP'JAZZ")
+        letters = [c for c in title_stripped if c.isalpha()]
+        if letters and len(title_stripped) < 40:
+            uppercase_ratio = sum(1 for c in letters if c.isupper()) / len(letters)
+            if uppercase_ratio > 0.85:
+                return False
+        # Reject titles ending with ":" — they're typically labels/headers, not event names
+        if title_stripped.endswith((":", "：")):
+            return False
+        # Reject titles that are obvious fragments/pieces
+        fragment_starts = (
+            "«", "»", "–", "—", "...", "…",
+            "voici ", "certains de ", "liste des ",
+            "galerie ", "dépliant ", "depliant ",
+            "programme :", "programme:",
+            "rendez-vous de ", "retrouvez ",
+            "catalogue ", "administrateur", "administrator",
+            "une initiative", "l'arrêté", "l'arrete", "'arrêté",
+            "du côté des", "du cote des",
+            "mercredi ", "jeudi ", "vendredi ", "samedi ", "dimanche ",
+            "lundi ", "mardi ",
+            "à voir en", "a voir en",
+            "tous les évènements", "tous les evenements",
+            "salle ", "spectacles passés", "spectacles passes",
+            "spectacles sésame",
+            "fin du ", "1. fin ", "1.fin ",
+        )
+        if any(title_lower.startswith(p) for p in fragment_starts):
+            return False
+        # Reject navigation/label-style single words or "Spectacles" etc.
+        nav_labels = {
+            "spectacles", "événements", "evenements", "saison",
+            "programmation", "agenda", "activités", "activites",
+        }
+        if title_lower in nav_labels:
+            return False
         return True
+
+    @staticmethod
+    def is_punctual_event(text: str) -> bool:
+        """Check whether the text describes a PUNCTUAL (one-off/limited-date) event."""
+        if not text:
+            return False
+        text_lower = _normalize(text)
+        punctual_markers = [
+            "spectacle", "concert", "festival", "fête", "fete",
+            "conte", "contes", "lecture",
+            "stage", "stages", "vacances",
+            "portes ouvertes", "kermesse", "carnaval",
+            "chasse aux oeufs", "chasse au trésor",
+            "atelier vacances", "stage vacances",
+            "ciné-goûter", "cine-gouter", "cinéma plein air",
+            "halloween", "noël", "noel", "pâques", "paques",
+            "exposition",
+            "représentation", "representation",
+        ]
+        return any(m in text_lower for m in punctual_markers)
 
     async def scrape_agenda_page(self, url: str, city: str) -> list[dict]:
         """Scrape a single agenda page for event items.
@@ -346,6 +458,10 @@ class BaseScraper(ABC):
 
             # Exclude institutional/admin content
             if self.is_excluded_content(title) or self.is_excluded_content(full_text):
+                continue
+
+            # Require PUNCTUAL event signals (not annual classes)
+            if not (self.is_punctual_event(title) or self.is_punctual_event(full_text)):
                 continue
 
             # Filter: only keep events relevant for families/kids

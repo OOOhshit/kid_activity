@@ -32,6 +32,18 @@ async def run_all_scrapers():
                     f"Scraper {scraper.category}/{city} failed: {e}"
                 )
 
-    insert_activities(all_activities)
-    logger.info(f"Scraping complete. Total activities collected: {len(all_activities)}")
-    return len(all_activities)
+    # Deduplicate by (title, city, category) — same event, no matter the source page
+    seen = set()
+    unique = []
+    for act in all_activities:
+        key = (act["title"].lower().strip(), act["city"], act["category"])
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(act)
+
+    insert_activities(unique)
+    logger.info(
+        f"Scraping complete. {len(all_activities)} raw, {len(unique)} unique activities inserted."
+    )
+    return len(unique)
