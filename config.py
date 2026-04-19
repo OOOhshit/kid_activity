@@ -43,7 +43,7 @@ SCRAPER_SOURCES = {
         "Le Pecq": "https://lepecq-pom.c3rb.org/index.php/agenda/bibliotheques-municipales",
         "Chatou": "https://mediatheque.chatou.fr/",
         "Croissy-sur-Seine": "https://bibliotheque.croissy.com/",
-        "Montesson": "https://montesson.fr/mediatheque-louis-aragon/",
+        "Montesson": "https://www.boucledesmediatheques.fr/mediatheque-de-montesson",
         "Saint-Germain-en-Laye": "https://mediatheques.saintgermainenlaye.fr/",
         "Rueil-Malmaison": "https://mediatheques.mairie-rueilmalmaison.fr/",
         "Nanterre": "https://mediatheques.nanterre.fr/",
