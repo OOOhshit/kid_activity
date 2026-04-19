@@ -21,8 +21,8 @@ CITIES = [
 ]
 
 # Age range for target audience
-AGE_MIN = 5
-AGE_MAX = 10
+AGE_MIN = 0
+AGE_MAX = 18
 
 # Scheduler: hour of day to run scraper (24h format)
 SCRAPE_HOUR = 6
