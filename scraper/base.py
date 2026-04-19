@@ -598,15 +598,57 @@ class BaseScraper(ABC):
 
     @staticmethod
     def extract_price(text: str) -> str | None:
-        """Extract price information from text."""
+        """Extract price information from text. Optional — returns None if no price found."""
         if not text:
             return None
-        text_lower = text.lower()
-        if "gratuit" in text_lower or "libre" in text_lower:
+        text_lower = _normalize(text)
+
+        # --- Free / gratuit ---
+        free_markers = [
+            "gratuit", "gratuite", "gratuits", "gratuites",
+            "entrée libre", "entree libre",
+            "accès libre", "acces libre",
+            "participation libre", "sans frais",
+        ]
+        if any(m in text_lower for m in free_markers):
             return "Gratuit"
-        match = re.search(r"(\d+(?:[.,]\d{1,2})?)\s*€", text)
-        if match:
-            return f"{match.group(1)}€"
+
+        # --- Price range: "5 à 15€", "de 5 à 15 euros", "entre 5 et 15€" ---
+        range_match = re.search(
+            r"(?:de\s+|entre\s+)?(\d+(?:[.,]\d{1,2})?)\s*(?:à|a|et|-)\s*"
+            r"(\d+(?:[.,]\d{1,2})?)\s*(?:€|eur\b|euros?\b)",
+            text_lower,
+        )
+        if range_match:
+            low = range_match.group(1).replace(",", ".")
+            high = range_match.group(2).replace(",", ".")
+            return f"{low}€ - {high}€"
+
+        # --- "À partir de X€" / "Dès X€" ---
+        from_match = re.search(
+            r"(?:à\s+partir\s+de|a\s+partir\s+de|dès|des)\s+"
+            r"(\d+(?:[.,]\d{1,2})?)\s*(?:€|eur\b|euros?\b)",
+            text_lower,
+        )
+        if from_match:
+            amount = from_match.group(1).replace(",", ".")
+            return f"À partir de {amount}€"
+
+        # --- Simple: "5€", "5 €", "5,50€", "5 euros" ---
+        simple_match = re.search(
+            r"(\d+(?:[.,]\d{1,2})?)\s*(?:€|eur\b|euros?\b)",
+            text_lower,
+        )
+        if simple_match:
+            amount = simple_match.group(1).replace(",", ".")
+            return f"{amount}€"
+
+        # --- € before number: "€ 5" ---
+        euro_first = re.search(r"€\s*(\d+(?:[.,]\d{1,2})?)", text_lower)
+        if euro_first:
+            amount = euro_first.group(1).replace(",", ".")
+            return f"{amount}€"
+
         return None
 
     @staticmethod
