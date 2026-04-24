@@ -1,8 +1,11 @@
 """Base scraper with shared HTTP fetching, navigation discovery, and parsing utilities."""
 
+import asyncio
 import logging
+import random
 import re
 import unicodedata
+from datetime import date, timedelta
 from abc import ABC, abstractmethod
 from urllib.parse import urljoin, urlparse
 
@@ -89,6 +92,7 @@ EXCLUDE_KEYWORDS = [
     "tarif périscolaire",
     # --- Cours annuels / activités régulières ---
     "cours hebdomadaire", "cours annuel", "toute l'année",
+    "gala de danse", "gala annuel", "spectacles de danses de fin d'année",
     "septembre à juin", "de septembre à",
     "trimestre", "semestre",
     "du lundi au vendredi",
@@ -164,10 +168,20 @@ GENERIC_TITLE_BLOCKLIST = {
     "activités de la bibliothèque", "activites de la bibliotheque",
     "carte des jpo des artistes 2021",
     "foot avec l'us croissy",
+    "manifestations", "concours logo",
+    "les nouvelles couleurs de la mpt",
+    "les temps forts de notre fin de saison",
+    "la 1000ième !", "la 1000ieme !",
+    "ca y est la nouvelle saison a commencé !",
+    "inscription : vacances scolaires",
+    "accueil des mercredis et pendant les vacances scolaires",
 }
 
 # Minimum title length to avoid nav items / buttons
 MIN_TITLE_LENGTH = 10
+
+# Maximum number of agenda pages to scrape per source site
+MAX_AGENDA_PAGES = 50
 
 
 class BaseScraper(ABC):
@@ -175,17 +189,39 @@ class BaseScraper(ABC):
 
     category: str = ""
 
+    _BROWSER_HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/125.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept-Encoding": "gzip, deflate, br",
+        "DNT": "1",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+    }
+
     async def _get_client(self) -> httpx.AsyncClient:
-        """Create a configured HTTP client."""
+        """Create an HTTP client that mimics a real browser."""
         return httpx.AsyncClient(
             timeout=REQUEST_TIMEOUT,
-            headers={"User-Agent": USER_AGENT},
+            headers=self._BROWSER_HEADERS,
             follow_redirects=True,
         )
 
-    async def fetch_page(self, url: str) -> BeautifulSoup:
+    async def fetch_page(self, url: str, polite_delay: bool = True) -> BeautifulSoup:
         """Fetch a URL and return parsed HTML."""
+        if polite_delay:
+            await asyncio.sleep(random.uniform(0.3, 1.0))
         async with await self._get_client() as client:
+            parsed = urlparse(url)
+            client.headers["Referer"] = f"{parsed.scheme}://{parsed.netloc}/"
             response = await client.get(url)
             response.raise_for_status()
             return BeautifulSoup(response.text, "lxml")
@@ -255,8 +291,14 @@ class BaseScraper(ABC):
             logger.info(f"No agenda pages discovered for {base_url}, using base URL")
             discovered.add(base_url)
 
-        logger.info(f"Discovered {len(discovered)} agenda page(s) for {base_url}")
-        return list(discovered)
+        result = list(discovered)
+        if len(result) > MAX_AGENDA_PAGES:
+            logger.info(
+                f"Limiting {len(result)} agenda pages to {MAX_AGENDA_PAGES} for {base_url}"
+            )
+            result = result[:MAX_AGENDA_PAGES]
+        logger.info(f"Discovered {len(result)} agenda page(s) for {base_url}")
+        return result
 
     def _extract_nav_links(self, soup: BeautifulSoup, base_url: str) -> list[tuple[str, str]]:
         """Extract links from navigation areas of the page."""
@@ -429,6 +471,30 @@ class BaseScraper(ABC):
         ]
         return any(m in text_lower for m in punctual_markers)
 
+    @staticmethod
+    def is_past_event(title: str, full_text: str, event_date: str | None) -> bool:
+        """Detect if an event is clearly in the past and should be skipped."""
+        today = date.today()
+        current_year = today.year
+
+        # If we extracted a specific date, check it directly
+        if event_date:
+            try:
+                ed = date.fromisoformat(event_date)
+                if ed < today - timedelta(days=30):
+                    return True
+            except ValueError:
+                pass
+
+        # Check for past years in the TITLE only (not full text to avoid
+        # false positives from copyright notices, footers, etc.)
+        title_norm = _normalize(title)
+        for year in range(2000, current_year):
+            if str(year) in title_norm:
+                return True
+
+        return False
+
     async def scrape_agenda_page(self, url: str, city: str) -> list[dict]:
         """Scrape a single agenda page for event items.
 
@@ -474,6 +540,11 @@ class BaseScraper(ABC):
 
             # Extract structured data
             event_date = self.parse_french_date(full_text)
+
+            # Skip events clearly in the past
+            if self.is_past_event(title, full_text, event_date):
+                continue
+
             event_time = self.parse_time(full_text)
             price = self.extract_price(full_text)
             age_min, age_max = self.extract_age_range(full_text)
@@ -497,33 +568,72 @@ class BaseScraper(ABC):
         return activities
 
     @staticmethod
+    def _is_in_nav(el) -> bool:
+        """Check if an element sits inside a nav/footer/sidebar (3 levels max)."""
+        nav_tags = {"nav", "footer", "aside"}
+        nav_classes = {"menu", "nav", "sidebar", "breadcrumb", "footer-widget", "footer-area"}
+        for i, parent in enumerate(el.parents):
+            if i > 4:
+                break
+            if parent.name in nav_tags:
+                return True
+            parent_classes = set(parent.get("class", [])) if hasattr(parent, "get") else set()
+            if parent_classes & nav_classes:
+                return True
+        return False
+
+    @staticmethod
     def _find_event_items(soup: BeautifulSoup) -> list:
         """Find individual event items on a page using multiple strategies."""
-        # Try specific selectors first
-        selectors = [
+
+        def _keep(el):
+            return len(el.get_text(strip=True)) > 30 and not BaseScraper._is_in_nav(el)
+
+        # Strategy 1: CMS-specific selectors (most precise)
+        specific_selectors = [
             "article.event", ".agenda-item", ".event-item",
             ".views-row", ".node--type-event", "li.event",
             ".activity-item", ".activite", "article.activity",
             ".spectacle-item", ".show-item", "article.spectacle",
-            ".program-item", ".saison-item", ".post-item",
-            ".agenda-list article", ".field-content",
-            "article", ".card", ".item",
+            ".program-item", ".saison-item",
+            ".tribe-events-calendar-list__event",
+            ".bandeau_item", ".film",
+            ".list_item", ".post-item",
         ]
-
-        for selector in selectors:
-            items = soup.select(selector)
-            if items and len(items) >= 2:
+        for selector in specific_selectors:
+            items = [el for el in soup.select(selector) if _keep(el)]
+            if len(items) >= 2:
                 return items
 
-        # Fallback: look for repeating structures with event-like class names
-        items = soup.find_all(["article", "div", "li", "section"], class_=lambda c: c and any(
-            kw in str(c).lower() for kw in [
-                "event", "agenda", "activ", "spectacle", "show",
-                "program", "item", "post", "entry", "card",
-            ]
-        ))
-        if items:
-            return items
+        # Strategy 2: Auto-detect repeating structures with content
+        class_groups: dict[str, list] = {}
+        for el in soup.find_all(["article", "div", "li", "section"], class_=True):
+            if not _keep(el):
+                continue
+            key = " ".join(sorted(el.get("class", [])))
+            class_groups.setdefault(key, []).append(el)
+
+        best_group = None
+        best_score = 0
+        for key, elements in class_groups.items():
+            if len(elements) < 2:
+                continue
+            avg_len = sum(len(el.get_text(strip=True)) for el in elements) / len(elements)
+            has_headings = any(el.find(["h2", "h3", "h4"]) for el in elements)
+            has_links = any(el.find("a", href=True) for el in elements)
+            score = len(elements) * (avg_len ** 0.5) * (2 if has_headings else 1) * (1.5 if has_links else 1)
+            if score > best_score:
+                best_score = score
+                best_group = elements
+
+        if best_group and len(best_group) >= 2:
+            return best_group
+
+        # Strategy 3: fall back to generic article tags with meaningful content
+        for selector in ["article", ".card"]:
+            items = [el for el in soup.select(selector) if _keep(el)]
+            if len(items) >= 2:
+                return items
 
         return []
 
